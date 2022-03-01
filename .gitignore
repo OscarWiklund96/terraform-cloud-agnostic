@@ -5,6 +5,12 @@
 *.tfstate
 *.tfstate.*
 
+# Credentials
+CREDENTIALS.json
+
+# Other repo
+serverless-photosharing-workshop
+
 # Crash log files
 crash.log
 
