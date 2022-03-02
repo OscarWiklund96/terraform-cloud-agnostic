@@ -86,7 +86,7 @@ resource "google_firestore_index" "my-index" {
   collection = "pictures"
 
   fields {
-    field_path = "thumbnails"
+    field_path = "thumbnail"
     order      = "DESCENDING"
   }
 
@@ -179,7 +179,7 @@ resource "google_pubsub_subscription" "cloudrun-subscription" {
   topic = google_pubsub_topic.thumbnail-topic.name
 
   push_config {
-    push_endpoint = "https://thumbnail-service-oemd5fljya-ey.a.run.app/"
+    push_endpoint = google_cloud_run_service.thumbnail-cloud-run.status[0].url
     oidc_token {
       service_account_email = "${google_service_account.service-account-pubsub.account_id}@${var.project_id}.iam.gserviceaccount.com"
     }
@@ -194,3 +194,65 @@ resource "google_pubsub_subscription_iam_member" "subscriber" {
 }
 
 
+#Cloud run for thumbnail service
+resource "google_cloud_run_service" "collage-cloud-run" {
+  name     = "collage-service"
+  location = "europe-west3"
+
+  template {
+    spec {
+      containers {
+        image = "gcr.io/terraform-pic-a-daily-2/collage-service"
+        env {
+          name  = "BUCKET_THUMBNAILS"
+          value = "thumbnails-${var.project_id}"
+        }
+      }
+    }
+  }
+  traffic {
+    percent         = 100
+    latest_revision = true
+  }
+}
+
+resource "google_service_account" "collage-sa" {
+  account_id   = "collage-scheduler-sa"
+  display_name = "Collage Scheduler Service Account"
+}
+
+data "google_iam_policy" "collage-service" {
+  binding {
+    role = "roles/run.invoker"
+
+    members = [
+      "serviceAccount:${google_service_account.collage-sa.account_id}@${var.project_id}.iam.gserviceaccount.com",
+    ]
+  }
+}
+
+resource "google_cloud_run_service_iam_policy" "collage-policy" {
+  location = google_cloud_run_service.collage-cloud-run.location
+  project = google_cloud_run_service.collage-cloud-run.project
+  service = google_cloud_run_service.collage-cloud-run.name
+  policy_data = data.google_iam_policy.collage-service.policy_data
+}
+
+resource "google_cloud_scheduler_job" "collage-job" {
+  name             = "collage-service-job"
+  description      = "collage http job"
+  schedule         = "0 */2 * * 1-5"
+
+  retry_config {
+    retry_count = 1
+  }
+
+  http_target {
+    http_method = "GET"
+    uri         = google_cloud_run_service.collage-cloud-run.status[0].url
+    
+    oidc_token {
+      service_account_email = "${google_service_account.collage-sa.account_id}@${var.project_id}.iam.gserviceaccount.com"
+    }
+  }
+}
